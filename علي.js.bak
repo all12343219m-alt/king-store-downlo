@@ -1,0 +1,189 @@
+const activeSpams = global.activeSpams || new Map();
+global.activeSpams = activeSpams;
+
+module.exports = {
+  command: "منشنات",
+  execute: async (sock, m, args) => {
+    try {
+      const from = m.key?.remoteJid || m.chat || 'unknown';
+      
+      const hay = require('../haykala/developer');
+      const senderJid = m.key.participant || m.key.remoteJid;
+      const pureNumber = String(senderJid).split('@')[0];
+      const lid = pureNumber + '@lid';
+      
+      const isAuthorized = hay.isFounder(lid) || hay.isOwnerbot(lid) || hay.isDeveloper(lid);
+      
+      if (!isAuthorized) {
+        return await sock.sendMessage(from, { 
+          text: "❌ هذا الأمر متاح فقط للمطورين والأونر والمؤسس." 
+        }, { quoted: m });
+      }
+
+      function getTargetJid(msg) {
+        try {
+          if (!msg?.message) return null;
+          const message = msg.message;
+
+          const ctx = message.extendedTextMessage?.contextInfo;
+          if (ctx?.mentionedJid?.length) return ctx?.mentionedJid[0];
+          if (ctx?.participant) return ctx.participant;
+          if (ctx?.quotedMessage?.participant) return ctx.quotedMessage?.participant;
+          if (ctx?.quotedMessage?.extendedTextMessage?.contextInfo?.participant) return ctx.quotedMessage.extendedTextMessage.contextInfo.participant;
+
+          if (msg.mentionedJid?.length) return msg.mentionedJid[0];
+          if (msg.quoted?.sender) return msg.quoted.sender;
+          if (msg.quotedMessage?.sender) return msg.quotedMessage.sender;
+          if (msg.key?.participant) return msg.key.participant;
+
+          return null;
+        } catch (e) {
+          return null;
+        }
+      }
+
+      const body = m.message?.conversation || m.message?.extendedTextMessage?.text || '';
+      const argsList = body.trim().split(/\s+/).slice(1);
+      
+      if (argsList.length === 0) {
+        const helpText = `⚙️ *طريقة استخدام أمر المنشنات:*
+
+📝 *الطريقة الأولى (رد على رسالة):*
+\`.منشنات 10\`
+- ترد على رسالة الشخص
+- تكتب .منشنات ثم الرقم (من 1 إلى 50)
+
+📝 *الطريقة الثانية (منشن مباشر):*
+\`.منشنات @الشخص 15\`
+- تعمل منشن للشخص
+- تكتب .منشنات ثم الرقم (من 1 إلى 50)
+
+🛑 *لإيقاف المنشنات:*
+\`.منشنات توقف\`
+
+⚠️ *تحذيرات أمنية:*
+• الحد الأقصى: 50 منشن
+• الفاصل بين كل منشن: 1 ثانية`;
+
+        return await sock.sendMessage(from, { text: helpText }, { quoted: m });
+      }
+
+      const targetJid = getTargetJid(m);
+      
+      const firstArg = (argsList[0] || '').toLowerCase();
+      if (['توقف','stop','وقف','ايقاف','انهاء'].includes(firstArg)) {
+        if (activeSpams.size > 0) {
+          let stopped = false;
+          for (const [groupId, interval] of activeSpams.entries()) {
+            clearInterval(interval);
+            activeSpams.delete(groupId);
+            stopped = true;
+          }
+          await sock.sendMessage(from, { text: "✋ تم إيقاف جميع عمليات المنشنات." }, { quoted: m });
+        } else {
+          await sock.sendMessage(from, { text: "ℹ️ ما في عمليات منشنات شغالة حالياً." }, { quoted: m });
+        }
+        return;
+      }
+
+      if (!targetJid) {
+        return await sock.sendMessage(from, { 
+          text: "❌ لازم تعمل منشن للشخص أو ترد على رسالة الشخص.\n\n📝 اكتب \`.منشنات\` بدون أي إضافات لرؤية التعليمات." 
+        }, { quoted: m });
+      }
+
+      let count = 0;
+
+      if (m.quoted) {
+        for (let a of argsList) {
+          const n = parseInt(a.replace(/\D/g,''),10);
+          if (!isNaN(n) && n > 0) {
+            count = n;
+            break;
+          }
+        }
+        
+        if (count === 0) {
+          count = 5;
+        }
+      } else {
+        if (argsList.length >= 2) {
+          const n = parseInt(argsList[1].replace(/\D/g,''),10);
+          if (!isNaN(n) && n > 0) count = n;
+        }
+        
+        if (count === 0) {
+          return await sock.sendMessage(from, { 
+            text: "❌ يجب تحديد عدد المنشنات بعد المنشن\nمثال: `.منشنات @user 10`" 
+          }, { quoted: m });
+        }
+      }
+
+      if (count > 50) {
+        count = 50;
+        await sock.sendMessage(from, { 
+          text: "⚠️ تم تحديد العدد إلى 50 (الحد الأقصى المسموح)" 
+        }, { quoted: m });
+      }
+
+      if (count < 1) {
+        return await sock.sendMessage(from, { 
+          text: "❌ الرقم يجب أن يكون بين 1 و 50" 
+        }, { quoted: m });
+      }
+
+      if (activeSpams.has(from)) {
+        clearInterval(activeSpams.get(from));
+        activeSpams.delete(from);
+      }
+
+      const shortName = targetJid.split('@')[0];
+      let done = 0;
+      const intervalTime = 1000;
+
+      const spammer = setInterval(async () => {
+        try {
+          if (done >= count) {
+            clearInterval(spammer);
+            activeSpams.delete(from);
+            await sock.sendMessage(from, { 
+              text: `✅ انتهينا من ${count} منشنات لـ @${shortName}`,
+              mentions: [targetJid] 
+            });
+            return;
+          }
+          done++;
+          await sock.sendMessage(from, { 
+            text: `👀 @${shortName} (${done}/${count})`,
+            mentions: [targetJid] 
+          });
+        } catch (err) {
+          clearInterval(spammer);
+          activeSpams.delete(from);
+          console.error("منشنات: خطأ أثناء الإرسال:", err);
+          try { 
+            await sock.sendMessage(from, { 
+              text: "❌ حصل خطأ أثناء إرسال المنشنات، أوقفت العملية." 
+            }); 
+          } catch(e){}
+        }
+      }, intervalTime);
+
+      activeSpams.set(from, spammer);
+
+      await sock.sendMessage(from, {
+        text: `🚀 بدأنا منشن لـ @${shortName} عدد (${count})\n⏱️ الفاصل: 1 ثانية بين كل منشن\n🛑 للإيقاف: .منشنات توقف`,
+        mentions: [targetJid]
+      }, { quoted: m });
+
+    } catch (err) {
+      console.error("❌ خطأ في منشنات.js:", err);
+      try {
+        const from = m.key?.remoteJid || m.chat || '';
+        if (from) await sock.sendMessage(from, { 
+          text: "❌ حصل خطأ في الأمر. تأكد من الصلاحيات والمعلومات المدخلة." 
+        }, { quoted: m });
+      } catch(e){}
+    }
+  }
+};
